@@ -2,17 +2,23 @@ import streamlit as st
 import json
 import os
 import glob
+import sys
 
 #Save file for tracking progress
 PROGRESS_FILE = "checklist_progress.json"
-BASE_ROOT = os.path.dirname(os.path.abspath(__file__))
+
+if getattr(sys, 'frozen', False):
+    BASE_ROOT = sys._MEIPASS
+else:
+    BASE_ROOT = os.path.dirname(os.path.abspath(__file__))
+
 ABS_PROGRESS_FILE = os.path.join(BASE_ROOT, PROGRESS_FILE)
 
 st.set_page_config(page_title="MH Wilds Checklist", layout="wide")
 
 if "user_checks" not in st.session_state:
     if os.path.exists(ABS_PROGRESS_FILE):
-        with open(ABS_PROGRESS_FILE, "r") as f:
+        with open (ABS_PROGRESS_FILE, "r") as f:
             st.session_state.user_checks = json.load(f)
     else:
         st.session_state.user_checks = {}
@@ -21,6 +27,13 @@ if "expanded_tabs" not in st.session_state:
     st.session_state.expanded_tabs = {}
 
 def save_checkbox_state(item_id, current_value):
+    if "user_checks" not in st.session_state:
+        if os.path.exists(ABS_PROGRESS_FILE):
+            with open(ABS_PROGRESS_FILE, "r") as f:
+                st.session_state.user_checks = json.load(f)
+        else:
+            st.session_state.user_checks = {}
+
     st.session_state.user_checks[item_id] = current_value
 
     try:
@@ -29,12 +42,16 @@ def save_checkbox_state(item_id, current_value):
     except Exception as e:
         st.error(f"Failed to save progress: {e}")
 
-@st.cache_data(show_spinner="Loading equipment datasets...")
+#@st.cache_data(show_spinner="Loading equipment datasets...")
 def load_equipment_data():
     all_gear = []
     seen_sets = set()
 
-    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    if getattr(sys, 'frozen', False):
+        BASE_DIR = sys._MEIPASS
+    else:
+        BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
     JSONS_DIR = os.path.join(BASE_DIR, "jsons")
     WEAPONS_DIR = os.path.join(JSONS_DIR, "weapons")
 
@@ -138,86 +155,185 @@ def load_equipment_data():
 
     return all_gear
 
+#Parses and defines monster crown data
+def load_crown_data():
+    all_crowns = []
+    BASE_DIR = sys._MEIPASS if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
+    monster_path = os.path.join(BASE_DIR, "jsons", "LargeMonsters.json")
+
+    if os.path.exists(monster_path):
+        with open(monster_path, "r", encoding="utf-8") as f:
+            try:
+                monster_data = json.load(f)
+                for monster in monster_data:
+                    name = monster.get("names", {}).get("en") or monster.get("name")
+                    sizes = monster.get("size", {})
+
+                    is_fixed_size = (sizes.get("mini_multiplier") == 1 and sizes.get("gold_multiplier") == 1)
+
+                    if name and sizes and not is_fixed_size:
+                        game_id = str(monster.get("game_id", name)).replace('-', '')
+                        all_crowns.append({
+                            "game_id": game_id,
+                            "name": name,
+                            "mini_size": round(sizes.get("mini", 0), 2),
+                            "gold_size": round(sizes.get("gold", 0), 2)
+                            })
+            except Exception as e:
+                st.error(f"Monster processing error: {e}")
+    else:
+        st.sidebar.error(f"Missing Monster File: '{monster_path}'")
+
+    return sorted(all_crowns, key=lambda x: x["name"])
+
 #Loads dataset
 equipment = load_equipment_data()
+crowns_data = load_crown_data()
 
 #Initializes session tracker
 st.title("Monster Hunter Wilds Crafting Checklist")
-st.write("Track endgame crafting completion")
+st.write("Track endgame crafting completion and crown completion")
 
-if not equipment:
-    st.warning("Database Empty. Ensure your folders and files match: root/jsons/Armor.json; root/jsons/Amulet.json; root/jsons/weapons/[Weapon].json")
+if not equipment and not crowns_data:
+    st.warning("Database Empty. Ensure your folders and files match: root/jsons/Armor.json; root/jsons/Amulet.json; root/jsons/weapons/[Weapon].json; root/jsons/LargeMonsters.json")
 else:
-    main_categories = ["Armors", "Charms", "Weapons"]
+    main_categories = ["Armors", "Charms", "Weapons", "Crowns"]
     selected_main = st.sidebar.radio("Select Category", main_categories)
 
-    main_filtered = [i for i in equipment if i["main_type"] == selected_main]
-
-    total_main_items = len(main_filtered)
-    checked_main_count = sum(1 for item in main_filtered if st.session_state.user_checks.get(item["id"], False))
-    main_progress = checked_main_count / total_main_items if total_main_items > 0 else 0
-
-    col1, col2 = st.columns(2)
-    with col1:
-        st.metric(label=f"Total {selected_main} Crafted", value=f"{checked_main_count} / {total_items if 'total_items' in locals() else total_main_items}")
-    with col2:
-        st.write(f"{selected_main} Progress")
-        st.progress(main_progress)
-        st.write(f"{int(main_progress * 100)}% Completed")
-
-    st.divider()
-
-    if selected_main == "Weapons":
-        weapon_types = sorted(list(set(item["sub_type"] for item in main_filtered)))
-
-        for w_type in weapon_types:
-            w_type_items = sorted([i for i in main_filtered if i["sub_type"] == w_type], key=lambda x: x["name"])
-            total_type_items = len(w_type_items)
-            
-            checked_type_count = sum(1 for item in w_type_items if st.session_state.user_checks.get(item["id"], False))
-            tab_label = f"{w_type} ({checked_type_count} / {total_type_items})"
-
-            toggle_key = f"expand_state_{w_type.lower().replace(' ', '_')}"
-
-            is_expanded = st.checkbox(tab_label, value=st.session_state.expanded_tabs.get(w_type, False), key=toggle_key)
-            st.session_state.expanded_tabs[w_type] = is_expanded
-
-            if is_expanded:
-                with st.container(border=True):
-                    if total_type_items == 0:
-                        st.info("No rarity 8 variants found.")
-                    else:
-                        grid_cols = st.columns(3)
-                        for idx, item in enumerate(w_type_items):
-                            col_target = grid_cols[idx % 3]
-                            with col_target:
-                                current_state = st.session_state.user_checks.get(item["id"], False)
-                                w_key = f"wgt_{item['id']}"
-
-                                st.checkbox(
-                                    f"{item['name']} (R8)",
-                                    value=current_state,
-                                    key=w_key,
-                                    on_change=save_checkbox_state,
-                                    args=(item["id"], not current_state)
-                                )
-                    st.write("")
-    else:
-        alphabetized_items = sorted(main_filtered, key=lambda x: x["name"])
-        if len(alphabetized_items) == 0:
-            st.info("No items match active filters.")
+    if selected_main == "Crowns":
+        if not crowns_data:
+            st.warning("Monster database empty or missing 'LargeMonsters.json' file")
         else:
-            grid_cols = st.columns(3)
-            for idx, item in enumerate(alphabetized_items):
-                col_target = grid_cols[idx % 3]
-                with col_target:
-                    current_state = st.session_state.user_checks.get(item["id"], False)
-                    w_key = f"wgt_{item['id']}"
+            total_crown_trackers = len(crowns_data) * 2
+            checked_mini = sum(1 for m in crowns_data if st.session_state.user_checks.get(f"crown_mini_{m['game_id']}", False))
+            checked_large = sum(1 for m in crowns_data if st.session_state.user_checks.get(f"crown_large_{m['game_id']}", False))
+            total_checked = checked_mini + checked_large
+            progress_pct = total_checked / total_crown_trackers if total_crown_trackers > 0 else 0
 
-                    st.checkbox(
-                        f"{item['name']} (R{item['rarity']})",
-                        value=current_state,
-                        key=w_key,
-                        on_change=save_checkbox_state,
-                        args=(item["id"], w_key)
-                        )
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric(label="Total Gold Crowns Obtained", value=f"{total_checked} / {total_crown_trackers}")
+            with col2:
+                st.write("Crown Completion Tracker")
+                st.progress(progress_pct)
+                st.write(f"{int(progress_pct * 100)}% Completed")
+
+            st.divider()
+
+            mini_label = f"Mini Crowns ({checked_mini} / {len(crowns_data)})"
+            is_mini_expanded = st.checkbox(mini_label, value=st.session_state.expanded_tabs.get("Mini Crowns", False), key="expand_state_mini_crowns")
+            st.session_state.expanded_tabs["Mini Crowns"] = is_mini_expanded
+
+            if is_mini_expanded:
+                with st.container(border=True):
+                    grid_cols = st.columns(3)
+                    for idx, monster in enumerate(crowns_data):
+                        col_target = grid_cols[idx % 3]
+                        with col_target:
+                            item_key = f"crown_mini_{monster['game_id']}"
+                            current_state = st.session_state.user_checks.get(item_key, False)
+                            w_key = f"wgt_{item_key}"
+
+                            st.checkbox(
+                                f"{monster['name']}",
+                                value=current_state,
+                                key=w_key,
+                                on_change=save_checkbox_state,
+                                args=(item_key, not current_state)
+                                )
+                st.write("")
+
+            large_label = f"Large Crowns ({checked_large} / {len(crowns_data)})"
+            is_large_expanded = st.checkbox(large_label, value=st.session_state.expanded_tabs.get("Large Crowns", False), key="expand_state_large_crowns")
+            st.session_state.expanded_tabs["Large Crowns"] = is_large_expanded
+
+            if is_large_expanded:
+                with st.container(border=True):
+                    grid_cols = st.columns(3)
+                    for idx, monster in enumerate(crowns_data):
+                        col_target = grid_cols[idx % 3]
+                        with col_target:
+                            item_key = f"crown_large_{monster['game_id']}"
+                            current_state = st.session_state.user_checks.get(item_key, False)
+                            w_key = f"wgt_{item_key}"
+
+                            st.checkbox(
+                                f"{monster['name']}",
+                                value=current_state,
+                                key=w_key,
+                                on_change=save_checkbox_state,
+                                args=(item_key, not current_state)
+                                )
+                st.write("")
+
+    else:
+        main_filtered = [i for i in equipment if i["main_type"] == selected_main]
+
+        total_main_items = len(main_filtered)
+        checked_main_count = sum(1 for item in main_filtered if st.session_state.user_checks.get(item["id"], False))
+        main_progress = checked_main_count / total_main_items if total_main_items > 0 else 0
+
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric(label=f"Total {selected_main} Crafted", value=f"{checked_main_count} / {total_main_items}")
+        with col2:
+            st.write(f"{selected_main} Progress")
+            st.progress(main_progress)
+            st.write(f"{int(main_progress * 100)}% Completed")
+
+        st.divider()
+
+        if selected_main == "Weapons":
+            weapon_types = sorted(list(set(item["sub_type"] for item in main_filtered)))
+            
+            for w_type in weapon_types:
+                w_type_items = sorted([i for i in main_filtered if i["sub_type"] == w_type], key=lambda x: x["name"])
+                total_type_items = len(w_type_items)
+
+                checked_type_count = sum(1 for item in w_type_items if st.session_state.user_checks.get(item["id"], False))
+                tab_label = f"{w_type} ({checked_type_count} / {total_type_items})"
+
+                toggle_key = f"expand_state_{w_type.lower().replace(' ', '_')}"
+
+                is_expanded = st.checkbox(tab_label, value=st.session_state.expanded_tabs.get(w_type, False), key=toggle_key)
+                st.session_state.expanded_tabs[w_type] = is_expanded
+
+                if is_expanded:
+                    with st.container(border=True):
+                        if total_type_items == 0:
+                            st.info("No rarity 8 variants found.")
+                        else:
+                            grid_cols = st.columns(3)
+                            for idx, item in enumerate(w_type_items):
+                                col_target = grid_cols[idx % 3]
+                                with col_target:
+                                    current_state = st.session_state.user_checks.get(item["id"], False)
+                                    w_key = f"wgt_{item['id']}"
+
+                                    st.checkbox(
+                                        f"{item['name']} (R8)",
+                                        value=current_state,
+                                        key=w_key,
+                                        on_change=save_checkbox_state,
+                                        args=(item["id"], not current_state)
+                                        )
+                        st.write("")
+        else:
+            alphabetized_items = sorted(main_filtered, key=lambda x: x["name"])
+            if len(alphabetized_items) == 0:
+                st.info("No items match active filters.")
+            else:
+                grid_cols = st.columns(3)
+                for idx, item in enumerate(alphabetized_items):
+                    col_target = grid_cols[idx % 3]
+                    with col_target:
+                        current_state = st.session_state.user_checks.get(item["id"], False)
+                        w_key = f"wgt_{item['id']}"
+
+                        st.checkbox(
+                            f"{item['name']} (R{item['rarity']})",
+                            value=current_state,
+                            key=w_key,
+                            on_change=save_checkbox_state,
+                            args=(item["id"], not current_state)
+                            )

@@ -1,12 +1,12 @@
 import os
 import sys
-import subprocess
+import streamlit.web.cli as stcli
 
 if __name__ == "__main__":
-    python_exe = sys.executable
+    base_path = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
+    script_path = os.path.join(base_path, 'MHWildsChecklist.py')
 
-    cmd = [python_exe, "-m", "streamlit", "run", "MHWildsChecklist.py"]
+    print(f"Launching checklist engine from: {script_path}")
 
-    print(f"Launching dashboard using: {python_exe}")
-    
-    subprocess.Popen(cmd)
+    sys.argv = ["streamlit", "run", script_path, "--global.developmentMode=false"]
+    sys.exit(stcli.main())
