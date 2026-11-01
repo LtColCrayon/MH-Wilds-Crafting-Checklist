@@ -36,11 +36,13 @@ For the tracker to parse data correctly, your root directory must contain a `jso
 The following is required for the tracker to run:
 
 [Python 3.11+](https://www.python.org/)
+
 [Streamlit Latest Stable Version](https://streamlit.io)
 
 optionals:
 
 If you want to turn this project into an executable you will need the following:
+
 [pyinstaller 6.0.0+](https://pyinstaller.org)
 
 ---
