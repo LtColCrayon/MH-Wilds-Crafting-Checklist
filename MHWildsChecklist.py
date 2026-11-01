@@ -129,13 +129,18 @@ def load_equipment_data():
         with open(charms_path, "r", encoding="utf-8") as f:
             try:
                 charms_data = json.load(f)
+                excluded_charms = {
+                    "unknown charm", "golden age charm", "historical charm",
+                    "hope charm", "rice ball charm", "secret charm"
+                    }
+
                 for charm_group in charms_data:
                     if "ranks" in charm_group and len(charm_group["ranks"]) > 0:
                         last_upgrade = charm_group["ranks"][-1]
                         charm_name = last_upgrade.get("names", {}).get("en")
 
                         if charm_name:
-                            if "unknown charm" in charm_name.lower() or charm_name.lower() == "unknown charm":
+                            if charm_name.lower().strip() in excluded_charms:
                                 continue
 
                             raw_id = str(last_upgrade.get('id', charm_name)).lower().replace(' ', '_')
@@ -165,6 +170,10 @@ def load_crown_data():
         with open(monster_path, "r", encoding="utf-8") as f:
             try:
                 monster_data = json.load(f)
+                excluded_monsters = {
+                    "gogmazios", "guardian arkveld", "jin dahaad", "zoh shia"
+                    }
+
                 for monster in monster_data:
                     name = monster.get("names", {}).get("en") or monster.get("name")
                     sizes = monster.get("size", {})
@@ -172,6 +181,8 @@ def load_crown_data():
                     is_fixed_size = (sizes.get("mini_multiplier") == 1 and sizes.get("gold_multiplier") == 1)
 
                     if name and sizes and not is_fixed_size:
+                        if name.lower().strip() in excluded_monsters:
+                            continue
                         game_id = str(monster.get("game_id", name)).replace('-', '')
                         all_crowns.append({
                             "game_id": game_id,
